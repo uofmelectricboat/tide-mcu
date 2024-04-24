@@ -110,7 +110,7 @@ void LEDReceive() {
     // try to parse packet
   int packetSize = CAN.parsePacket();
 
-  if (packetSize) {
+  if (packetSize && CAN.packetId() == 2001) {
     // received a packet
     Serial.print("Received ");
 
