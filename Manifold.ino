@@ -40,9 +40,9 @@ void ManifoldReceive() {
     // try to parse packet
   int packetSize = CAN.parsePacket();
 
-  if (packetSize && CAN.packetId() == 2002) {
+  if (packetSize && CAN.packetId() == 0x7D2) {
     // received a packet
-    Serial.print("Received ");
+    //Serial.print("Received ");
 
     if (CAN.packetExtended()) {
       //Serial.print("extended ");
@@ -68,13 +68,15 @@ void ManifoldReceive() {
       // only print packet data for non-RTR packets
       int i = 0;
       while (CAN.available()) {
-        data[i] = CAN.read();
+        Serial.print(CAN.read());
+        data[i] = (char)CAN.peek();
+        //Serial.println((int)data[i]);
         i++;
       }
 
       if(data[0] == 1){
         digitalWrite(Man1, HIGH);
-
+        //Serial.print("hi");
       }else{
         digitalWrite(Man1, LOW);
       }
