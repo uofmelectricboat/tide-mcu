@@ -15,7 +15,7 @@ E-stop (A-BRB) is intentionally not included
 
 
 // Steering wheel encoder
-#define EncoderPin 35 // "input only"
+#define EncoderPin 35 \// "input only"
 
 // Throttle Potentiometer
 #define ThrottlePin 34 // "input only"
@@ -48,7 +48,7 @@ GND	| GND
 CTX	| GPIO_5
 CRX	| GPIO_4
 */
-// #include <CAN.h>
+#include <CAN.h>
 
 int encoderVal = 0;
 int throttleVal = 0;
@@ -141,11 +141,11 @@ IDs
 -----------------------------------*/
 void buttonstoCAN(){
   CAN.beginPacket(2000);
-  CAN.write(bool(analogRead(CommsPin)));
-  CAN.write(bool(analogRead(TrimUpPin)));
-  CAN.write(bool(analogRead(TrimDownPin)));
-  CAN.write(bool(analogRead(GainUpPin)));
-  CAN.write(bool(analogRead(GainDownPin)));
+  CAN.write(bool(digitalRead(CommsPin)));
+  CAN.write(bool(digitalRead(TrimUpPin)));
+  CAN.write(bool(digitalRead(TrimDownPin)));
+  CAN.write(bool(digitalRead(GainUpPin)));
+  CAN.write(bool(digitalRead(GainDownPin)));
 
 
   Serial.println(bool(digitalRead(CommsPin)));
