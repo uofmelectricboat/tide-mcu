@@ -1,11 +1,38 @@
 #include <Arduino.h>
-#define TrimUpPin 26
-#define TrimDownPin 25
-#define GainUpPin 32
-#define GainDownPin 33
-#define EStopPin 34
-#define EncoderPin 36
-#define ThrottlePin 39
+
+/*
+Steering Wheel Buttons
+Momentary buttons
+All should be pullup
+
+E-stop (A-BRB) is intentionally not included
+*/
+#define CommsPin 12    // Top Right Button (B-TRB) // CHECK since "boot fails if pulled high, strapping pin"
+#define TrimUpPin 14    // Right Paddle (C-RPD) // "outputs PWM signal at boot"
+#define TrimDownPin 27  // Left Paddle (E-LPD)
+#define GainUpPin 26    // Top Left Button (F-TLB)
+#define GainDownPin 25  // Bottom Left Button (G-BLB)
+
+
+// Steering wheel encoder
+#define EncoderPin 35 // "input only"
+
+// Throttle Potentiometer
+#define ThrottlePin 34 // "input only"
+
+// /* 
+// Direction Shifter
+// Toggle switches
+// All should be pullup
+
+// When neither shifter forward or reverse are active,
+// the shifter is in the neutral position
+// */
+// #define ShifterForwardPin 15 //	"outputs PWM signal at boot, strapping pin"
+// #define ShifterReversePin 2 // "connected to on-board LED, must be left floating or LOW to enter flashing mode"
+// #define ShifterSwitchPin 13
+
+// Switchboard Green LEDs
 #define LED1 23
 #define LED2 22
 #define LED3 18
@@ -13,7 +40,15 @@
 #define LED5 21
 #define LED6 19
 
-#include <CAN.h>
+/*
+CAN default pins
+CAN | ESP32
+3V3	| 3V3
+GND	| GND
+CTX	| GPIO_5
+CRX	| GPIO_4
+*/
+// #include <CAN.h>
 
 int encoderVal = 0;
 int throttleVal = 0;
@@ -26,13 +61,23 @@ void setup() {
 
   Serial.println("CAN mcu");
 
-  pinMode(GainUpPin, INPUT);
-  pinMode(TrimUpPin, INPUT);
-  pinMode(TrimDownPin,INPUT);
-  pinMode(GainDownPin, INPUT);
-  pinMode(EStopPin, INPUT);
+  // Steering momentary buttons
+  pinMode(CommsPin, INPUT_PULLUP);
+  pinMode(GainUpPin, INPUT_PULLUP);
+  pinMode(TrimUpPin, INPUT_PULLUP);
+  pinMode(TrimDownPin, INPUT_PULLUP);
+  pinMode(GainDownPin, INPUT_PULLUP);
+
+  // // Shifter toggle switches
+  // pinMode(ShifterForwardPin, INPUT_PULLUP);
+  // pinMode(ShifterReversePin, INPUT_PULLUP);
+  // pinMode(ShifterSwitchPin, INPUT_PULLUP);
+
+  // Encoder & Potentiometer
   pinMode(EncoderPin, INPUT);
   pinMode(ThrottlePin, INPUT);
+
+  // Switchboard LEDs
   pinMode(LED1, OUTPUT);
   pinMode(LED2, OUTPUT);
   pinMode(LED3, OUTPUT);
@@ -57,6 +102,7 @@ void loop() {
   throttletoCAN(throttleVal);
 
   buttonstoCAN();
+  delay(500);
 
   LEDReceive();
 }
@@ -95,13 +141,21 @@ IDs
 -----------------------------------*/
 void buttonstoCAN(){
   CAN.beginPacket(2000);
+  CAN.write(bool(analogRead(CommsPin)));
   CAN.write(bool(analogRead(TrimUpPin)));
   CAN.write(bool(analogRead(TrimDownPin)));
   CAN.write(bool(analogRead(GainUpPin)));
   CAN.write(bool(analogRead(GainDownPin)));
-  CAN.write(bool(analogRead(EStopPin)));
-  CAN.endPacket();
-  //cSerial.println("sent");
+
+
+  Serial.println(bool(digitalRead(CommsPin)));
+  Serial.println(bool(digitalRead(TrimUpPin)));
+  Serial.println(bool(digitalRead(TrimDownPin)));
+  Serial.println(bool(digitalRead(GainUpPin)));
+  Serial.println(bool(digitalRead(GainDownPin)));
+
+  // CAN.endPacket();
+  Serial.println("sent");
 }
 
 
@@ -115,23 +169,23 @@ void LEDReceive() {
     Serial.print("Received ");
 
     if (CAN.packetExtended()) {
-      //Serial.print("extended ");
+      Serial.print("extended ");
     }
 
     if (CAN.packetRtr()) {
       // Remote transmission request, packet contains no data
-      //Serial.print("RTR ");
+      Serial.print("RTR ");
     }
 
-    //Serial.print("packet with id 0x");
-    //Serial.print(CAN.packetId(), HEX);
+    Serial.print("packet with id 0x");
+    Serial.print(CAN.packetId(), HEX);
 
     if (CAN.packetRtr()) {
-      //Serial.print(" and requested length ");
-      //Serial.println(CAN.packetDlc());
+      Serial.print(" and requested length ");
+      Serial.println(CAN.packetDlc());
     } else {
-      //Serial.print(" and length ");
-      //Serial.println(packetSize);
+      Serial.print(" and length ");
+      Serial.println(packetSize);
 
       char data[packetSize];
 
@@ -179,7 +233,7 @@ void LEDReceive() {
       }else{
         digitalWrite(LED6, LOW);
       }
-      //Serial.println();
+      Serial.println();
     }
 
     Serial.println();
