@@ -15,7 +15,7 @@ E-stop (A-BRB) is intentionally not included
 
 
 // Steering wheel encoder
-#define EncoderPin 35 \// "input only"
+#define EncoderPin 35 // "input only"
 
 // Throttle Potentiometer
 #define ThrottlePin 34 // "input only"
