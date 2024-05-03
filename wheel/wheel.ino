@@ -17,18 +17,19 @@ E-stop (A-BRB) is intentionally not included
 
 
 // Steering wheel encoder
-#define EncoderPin 35 // Should not be set to input, "input only"
+#define EncoderPin 32 // Two away from the throttle pin
 
 // Throttle Potentiometer
 #define ThrottlePin 34 // Should not be set to input, "input only"
 
 // Switchboard Green LEDs
+// Connected to the LED's positive leads, i.e. the red wire
 #define LED1 23
 #define LED2 22
-#define LED3 18
-#define LED4 17
-#define LED5 21
-#define LED6 19
+#define LED3 21
+#define LED4 19
+#define LED5 18
+#define LED6 17
 
 /*
 CAN default pins
@@ -106,7 +107,7 @@ float floatMap(float x, float in_min, float in_max, float out_min, float out_max
 }
 
 float readEncoder(){
-    return floatMap(analogRead(EncoderPin), 0, 4095, 0, 360); //Scale => [0,360]
+    return floatMap(analogRead(ThrottlePin), 0, 4095, 0, 360); //Scale => [0,360]
 
 }
 
