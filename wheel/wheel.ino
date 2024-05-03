@@ -1,13 +1,15 @@
-#include <Arduino.h>
+/*
+All the quotes are from here: https://randomnerdtutorials.com/esp32-pinout-reference-gpios/
+*/
 
 /*
 Steering Wheel Buttons
 Momentary buttons
-All should be pullup
+All should be set to pullup, using the ESP32's internal pullup resistors
 
 E-stop (A-BRB) is intentionally not included
 */
-#define CommsPin 12    // Top Right Button (B-TRB) // CHECK since "boot fails if pulled high, strapping pin"
+#define CommsPin 12    // Top Right Button (B-TRB) // "boot fails if pulled high, strapping pin" = works fine
 #define TrimUpPin 14    // Right Paddle (C-RPD) // "outputs PWM signal at boot"
 #define TrimDownPin 27  // Left Paddle (E-LPD)
 #define GainUpPin 26    // Top Left Button (F-TLB)
@@ -15,10 +17,10 @@ E-stop (A-BRB) is intentionally not included
 
 
 // Steering wheel encoder
-#define EncoderPin 35 // "input only"
+#define EncoderPin 35 // Should not be set to input, "input only"
 
 // Throttle Potentiometer
-#define ThrottlePin 34 // "input only"
+#define ThrottlePin 34 // Should not be set to input, "input only"
 
 // /* 
 // Direction Shifter
@@ -74,7 +76,7 @@ void setup() {
   // pinMode(ShifterSwitchPin, INPUT_PULLUP);
 
   // Encoder & Potentiometer
-  pinMode(EncoderPin, INPUT);
+  // pinMode(EncoderPin, INPUT);
   pinMode(ThrottlePin, INPUT);
 
   // Switchboard LEDs
@@ -108,7 +110,11 @@ void loop() {
 }
 
 float readEncoder(){
-  return (int)analogRead(EncoderPin)*360./4095.; //Scale => [0,360]
+  int encoder = (int)analogRead(EncoderPin)*360./4095.; //Scale => [0,360]
+  Serial.print("Encoder: ");
+  Serial.println(analogRead(EncoderPin));
+  return encoder;
+
 }
 
 float readThrottle(){
