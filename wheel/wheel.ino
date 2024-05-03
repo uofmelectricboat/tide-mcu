@@ -22,18 +22,6 @@ E-stop (A-BRB) is intentionally not included
 // Throttle Potentiometer
 #define ThrottlePin 34 // Should not be set to input, "input only"
 
-// /* 
-// Direction Shifter
-// Toggle switches
-// All should be pullup
-
-// When neither shifter forward or reverse are active,
-// the shifter is in the neutral position
-// */
-// #define ShifterForwardPin 15 //	"outputs PWM signal at boot, strapping pin"
-// #define ShifterReversePin 2 // "connected to on-board LED, must be left floating or LOW to enter flashing mode"
-// #define ShifterSwitchPin 13
-
 // Switchboard Green LEDs
 #define LED1 23
 #define LED2 22
@@ -70,15 +58,8 @@ void setup() {
   pinMode(TrimDownPin, INPUT_PULLUP);
   pinMode(GainDownPin, INPUT_PULLUP);
 
-  // // Shifter toggle switches
-  // pinMode(ShifterForwardPin, INPUT_PULLUP);
-  // pinMode(ShifterReversePin, INPUT_PULLUP);
-  // pinMode(ShifterSwitchPin, INPUT_PULLUP);
-
-  // Encoder & Potentiometer
-  // pinMode(EncoderPin, INPUT);
-  pinMode(ThrottlePin, INPUT);
-
+  // Encoder & Potentiometer should NOT be set to input
+  
   // Switchboard LEDs
   pinMode(LED1, OUTPUT);
   pinMode(LED2, OUTPUT);
@@ -98,27 +79,39 @@ void setup() {
 void loop() {
 
   encoderVal = readEncoder();
+
+  // Encoder testing
+  Serial.print("Encoder: ");
+  Serial.println(encoderVal);
+
   encodertoCAN(encoderVal);
 
   throttleVal = readThrottle();
+
+  // Throttle testing
+  Serial.print("Throttle: ");
+  Serial.println(throttleVal);
+  delay(500);
+
   throttletoCAN(throttleVal);
 
   buttonstoCAN();
-  delay(500);
 
   LEDReceive();
 }
 
+// From https://esp32io.com/tutorials/esp32-potentiometer
+float floatMap(float x, float in_min, float in_max, float out_min, float out_max) {
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
 float readEncoder(){
-  int encoder = (int)analogRead(EncoderPin)*360./4095.; //Scale => [0,360]
-  Serial.print("Encoder: ");
-  Serial.println(analogRead(EncoderPin));
-  return encoder;
+    return floatMap(analogRead(EncoderPin), 0, 4095, 0, 360); //Scale => [0,360]
 
 }
 
 float readThrottle(){
-  return (int)analogRead(ThrottlePin)*100./4095.; //Scale => [0,100]
+  return floatMap(analogRead(ThrottlePin), 0, 4095, 0, 100); //Scale => [0,100]
 }
 
 void encodertoCAN(int val){
@@ -153,14 +146,19 @@ void buttonstoCAN(){
   CAN.write(bool(digitalRead(GainUpPin)));
   CAN.write(bool(digitalRead(GainDownPin)));
 
-
+  //  Button testing
+  Serial.print("Comms: ");
   Serial.println(bool(digitalRead(CommsPin)));
+  Serial.print("Trim Up: ");
   Serial.println(bool(digitalRead(TrimUpPin)));
+  Serial.print("Trim Down: ");
   Serial.println(bool(digitalRead(TrimDownPin)));
+  Serial.print("Gain Up: ");
   Serial.println(bool(digitalRead(GainUpPin)));
+  Serial.print("Gain Down: ");
   Serial.println(bool(digitalRead(GainDownPin)));
 
-  // CAN.endPacket();
+  CAN.endPacket();
   Serial.println("sent");
 }
 
