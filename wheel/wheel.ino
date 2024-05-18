@@ -31,6 +31,23 @@ E-stop (A-BRB) is intentionally not included
 #define LED5 18
 #define LED6 17
 
+// Lists that contain the Steering Wheel buttons and the LED pins
+#define NUM_BUTTONS 5
+#define NUM_LEDS 6
+
+int buttons[NUM_BUTTONS] = {CommsPin, TrimUpPin, TrimDownPin, GainUpPin, GainDownPin};
+const String button_names[NUM_BUTTONS] = {"Comms", "Trim Up", "Trim Down", "Gain Up", "Gain Down"};
+
+int LEDs[NUM_LEDS] = {LED1, LED2, LED3, LED4, LED5, LED6};
+
+// For serial
+const String dash = " - ";
+const String LED_ON = "ON; ";
+const String LED_OFF = "OFF; ";
+
+
+#include <CAN.h>
+
 /*
 CAN default pins
 CAN | ESP32
@@ -39,66 +56,75 @@ GND	| GND
 CTX	| GPIO_5
 CRX	| GPIO_4
 */
-#include <CAN.h>
+
+// Can bitrate
+#define bitrateCAN 500E3
+
+// CAN Ids
+#define encoderId  1999
+#define throttleId 1998
+#define buttonsId  2000
+#define LEDsId     2001
+
 
 int encoderVal = 0;
 int throttleVal = 0;
-uint16_t i = 0;
+// uint16_t i = 0; // FIXME not sure why this is here, should delete it
+
+
+#include "debug.h"
+
+// Debug mode
+#define debug true
 
 void setup() {
+  debugMode(debug);
+
   Serial.begin(9600);
 
-  while(!Serial){}
-
-  Serial.println("CAN mcu");
+  while(debug && !Serial){} // Wait for serial if in debug mode
+  debugPrintln("CAN mcu");
 
   // Steering momentary buttons
-  pinMode(CommsPin, INPUT_PULLUP);
-  pinMode(GainUpPin, INPUT_PULLUP);
-  pinMode(TrimUpPin, INPUT_PULLUP);
-  pinMode(TrimDownPin, INPUT_PULLUP);
-  pinMode(GainDownPin, INPUT_PULLUP);
-
-  // Encoder & Potentiometer should NOT be set to input
-  
-  // Switchboard LEDs
-  pinMode(LED1, OUTPUT);
-  pinMode(LED2, OUTPUT);
-  pinMode(LED3, OUTPUT);
-  pinMode(LED4, OUTPUT);
-  pinMode(LED5, OUTPUT);
-  pinMode(LED6, OUTPUT);
-
-  if(!CAN.begin(500E3)){
-    Serial.println("Starting CAN fail");
-    while(1);
+  for (int i = 0; i < NUM_BUTTONS; i++) {
+    pinMode(buttons[i], INPUT_PULLUP);
   }
 
+  // Encoder & Potentiometer SHOULD NOT be set to input
+  
+  // Switchboard LEDs
+  for (int i = 0; i < NUM_LEDS; i++) {
+    pinMode(LEDs[i], OUTPUT);
+  }
 
+  // Wait for CAN to begin
+  while(!CAN.begin(bitrateCAN)){
+    debugPrintln("Starting CAN fail");
+  }
 }
 
 void loop() {
 
-  encoderVal = readEncoder();
+  encoderSend();
 
-  // Encoder testing
-  Serial.print("Encoder: ");
-  Serial.println(encoderVal);
+  throttleSend();
 
-  encodertoCAN(encoderVal);
-
-  throttleVal = readThrottle();
-
-  // Throttle testing
-  Serial.print("Throttle: ");
-  Serial.println(throttleVal);
-  delay(500);
-
-  throttletoCAN(throttleVal);
-
-  buttonstoCAN();
+  buttonsSend();
 
   LEDReceive();
+}
+
+
+// Encoder and Throttle to CAN
+void potToCAN(const uint16_t id, const int &val, const String &pot) {
+  const unsigned long size = sizeof(val);
+  CAN.beginPacket(id);
+  uint8_t data[size];           // Create char array
+  memcpy(data, &val, size);  // Store bytes of val to array
+  CAN.write(data, size);     // Write the buffer to CAN
+  CAN.endPacket();
+
+  debugPrintln(pot + dash + val);
 }
 
 // From https://esp32io.com/tutorials/esp32-potentiometer
@@ -106,91 +132,56 @@ float floatMap(float x, float in_min, float in_max, float out_min, float out_max
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-float readEncoder(){
-    return floatMap(analogRead(ThrottlePin), 0, 4095, 0, 360); //Scale => [0,360]
-
+void encoderSend() {
+  int val = floatMap(analogRead(EncoderPin), 0, 4095, 0, 360); //Scale => [0,360]
+  potToCAN(encoderId, val, "Encoder");
 }
 
-float readThrottle(){
-  return floatMap(analogRead(ThrottlePin), 0, 4095, 0, 100); //Scale => [0,100]
+void throttleSend() {
+  int val = floatMap(analogRead(ThrottlePin), 0, 4095, 0, 100); //Scale => [0,100]
+  potToCAN(throttleId, val, "Throttle");
 }
 
-void encodertoCAN(int val){
-  CAN.beginPacket(1999);
-  char data[sizeof(val)];               //Create char array
-  memcpy(data, &val, sizeof(val));       //Store bytes of val to array
-  for(int j = 0; j < sizeof(val); j++){  //Write bytes one by one to CAN
-    CAN.write(data[j]);
+
+void buttonsSend() {
+  CAN.beginPacket(buttonsId);
+  for (int i = 0; i < NUM_BUTTONS; i++) {
+    CAN.write(bool(digitalRead(buttons[i])));
+
+    debugPrintln(button_names[i] + dash + digitalRead(buttons[i]));
   }
+  
   CAN.endPacket();
-}
-
-void throttletoCAN(int val){
-  CAN.beginPacket(1998);
-  char data[sizeof(val)];                //Create char array
-  memcpy(data, &val, sizeof(val));       //Store bytes of val to array
-  for(int j = 0; j < sizeof(val); j++){  //Write bytes one by one to CAN
-    CAN.write(data[j]);
-  }
-  CAN.endPacket();
-}
-
-/*----------------------------------
-IDs
-2000
------------------------------------*/
-void buttonstoCAN(){
-  CAN.beginPacket(2000);
-  CAN.write(bool(digitalRead(CommsPin)));
-  CAN.write(bool(digitalRead(TrimUpPin)));
-  CAN.write(bool(digitalRead(TrimDownPin)));
-  CAN.write(bool(digitalRead(GainUpPin)));
-  CAN.write(bool(digitalRead(GainDownPin)));
-
-  //  Button testing
-  Serial.print("Comms: ");
-  Serial.println(bool(digitalRead(CommsPin)));
-  Serial.print("Trim Up: ");
-  Serial.println(bool(digitalRead(TrimUpPin)));
-  Serial.print("Trim Down: ");
-  Serial.println(bool(digitalRead(TrimDownPin)));
-  Serial.print("Gain Up: ");
-  Serial.println(bool(digitalRead(GainUpPin)));
-  Serial.print("Gain Down: ");
-  Serial.println(bool(digitalRead(GainDownPin)));
-
-  CAN.endPacket();
-  Serial.println("sent");
+  debugPrintln("Sent buttons");
 }
 
 
 void LEDReceive() {
-
-    // try to parse packet
+  // try to parse packet
   int packetSize = CAN.parsePacket();
 
-  if (packetSize && CAN.packetId() == 2001) {
+  if (packetSize && CAN.packetId() == LEDsId) {
     // received a packet
-    Serial.print("Received ");
+    debugPrint("Received ");
 
     if (CAN.packetExtended()) {
-      Serial.print("extended ");
+      debugPrint("extended ");
     }
 
     if (CAN.packetRtr()) {
       // Remote transmission request, packet contains no data
-      Serial.print("RTR ");
+      debugPrint("RTR ");
     }
 
-    Serial.print("packet with id 0x");
-    Serial.print(CAN.packetId(), HEX);
+    debugPrint("packet with id 0x");
+    debugPrint(CAN.packetId(), HEX);
 
     if (CAN.packetRtr()) {
-      Serial.print(" and requested length ");
-      Serial.println(CAN.packetDlc());
+      debugPrint(" and requested length ");
+      debugPrintln(CAN.packetDlc());
     } else {
-      Serial.print(" and length ");
-      Serial.println(packetSize);
+      debugPrint(" and length ");
+      debugPrintln(packetSize);
 
       char data[packetSize];
 
@@ -201,46 +192,29 @@ void LEDReceive() {
         i++;
       }
 
-      if(data[0] == 1){
-        digitalWrite(LED1, HIGH);
-        Serial.print("recieve yay");
-      }else{
-        digitalWrite(LED1, LOW);
+      debugPrint("LEDS: ");
+
+      // Iterate through the LEDs
+      for (int i = 0; i < NUM_LEDS; i++) {
+        debugPrint((i+1) + dash);
+
+        if (data[i]) { // 1 evaluates to true, 0 evaluates to false
+  
+          debugPrintln(LED_ON);
+
+          digitalWrite(LEDs[i], HIGH);
+        }
+
+        else {
+          debugPrint(LED_OFF);
+
+          digitalWrite(LEDs[i], LOW);
+        }
       }
 
-      if(data[1] == 1){
-        digitalWrite(LED2, HIGH);
-        Serial.print("LED2");
-      }else{
-        digitalWrite(LED2, LOW);
-      }
-
-      if(data[2] == 1){
-        digitalWrite(LED3, HIGH);
-      }else{
-        digitalWrite(LED3, LOW);
-      }
-
-      if(data[3] == 1){
-        digitalWrite(LED4, HIGH);
-      }else{
-        digitalWrite(LED4, LOW);
-      }
-
-      if(data[4] == 1){
-        digitalWrite(LED5, HIGH);
-      }else{
-        digitalWrite(LED5, LOW);
-      }
-
-      if(data[5] == 1){
-        digitalWrite(LED6, HIGH);
-      }else{
-        digitalWrite(LED6, LOW);
-      }
-      Serial.println();
+      debugPrintln("");
     }
 
-    Serial.println();
+    debugPrintln("");
   }
 }
