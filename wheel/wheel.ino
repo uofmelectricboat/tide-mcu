@@ -71,14 +71,14 @@ int encoderVal = 0;
 int throttleVal = 0;
 // uint16_t i = 0; // FIXME not sure why this is here, should delete it
 
-
+// FIXME instead use ESP32Logger or Arduino_DebugUtilis, or EasyLogger = can be compiled out
 #include "debug.h"
 
 // Debug mode
-#define debug true
+#define debugging true
 
 void setup() {
-  debugMode(debug);
+  debug.debugMode(debugging);
 
   Serial.begin(9600);
 
@@ -116,10 +116,10 @@ void loop() {
 
 
 // Encoder and Throttle to CAN
-void potToCAN(const uint16_t id, const int &val, const String &pot) {
-  const unsigned long size = sizeof(val);
+void potToCAN(const int id, const int val, const String pot) {
+  size_t size = sizeof(val);
   CAN.beginPacket(id);
-  uint8_t data[size];           // Create char array
+  const uint8_t data[size];           // Create char array
   memcpy(data, &val, size);  // Store bytes of val to array
   CAN.write(data, size);     // Write the buffer to CAN
   CAN.endPacket();
@@ -212,9 +212,9 @@ void LEDReceive() {
         }
       }
 
-      debugPrintln("");
+      debugPrintln();
     }
 
-    debugPrintln("");
+    debugPrintln();
   }
 }
