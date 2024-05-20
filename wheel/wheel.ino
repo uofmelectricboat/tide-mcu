@@ -2,6 +2,37 @@
 All the quotes are from here: https://randomnerdtutorials.com/esp32-pinout-reference-gpios/
 */
 
+class Pot {
+  private:
+    int pin;
+    int in_min;
+    int in_max;
+    int out_min;
+    int out_max;
+    const String pot_name;
+
+    // From https://esp32io.com/tutorials/esp32-potentiometer
+    float floatMap(float x) {
+      return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+    }
+
+  public:
+    Pot(int pin, int in_min, int in_max, int out_min, int out_max, const String name) : 
+      pin(pin), in_min(in_min), in_max(in_max), out_min(out_max), pot_name(name) {}
+
+    float read() {
+      floatMap(readRaw());
+    }
+
+    uint16_t readRaw() {
+      return analogRead(pin);
+    }
+
+    const String & name() {
+      return pot_name;
+    }
+};
+
 /*
 Steering Wheel Buttons
 Momentary buttons
@@ -14,13 +45,6 @@ E-stop (A-BRB) is intentionally not included
 #define TrimDownPin 27  // Left Paddle (E-LPD)
 #define GainUpPin 26    // Top Left Button (F-TLB)
 #define GainDownPin 25  // Bottom Left Button (G-BLB)
-
-
-// Steering wheel encoder
-#define EncoderPin 32 // Two away from the throttle pin
-
-// Throttle Potentiometer
-#define ThrottlePin 34 // Should not be set to input, "input only"
 
 // Switchboard Green LEDs
 // Connected to the LED's positive leads, i.e. the red wire
@@ -67,23 +91,28 @@ CRX	| GPIO_4
 #define LEDsId     2001
 
 
-int encoderVal = 0;
-int throttleVal = 0;
 // uint16_t i = 0; // FIXME not sure why this is here, should delete it
 
 // FIXME instead use ESP32Logger or Arduino_DebugUtilis, or EasyLogger = can be compiled out
-#include "debug.h"
 
 // Debug mode
 #define debugging true
 
+
+  // Steering wheel encoder
+  Pot encoder(32,0,4095,0,360, "Encoder"); // pin, analog min & max, out min & max Scale => [0,360]
+
+  // Throttle Potentiometer
+  Pot throttle(34,0,4095,0,100, "Throttle"); // pin, analog min & max, out min & max  Scale => [0,100]
+
 void setup() {
-  debug.debugMode(debugging);
+  // debugMode(debugging);
+
 
   Serial.begin(9600);
 
-  while(debug && !Serial){} // Wait for serial if in debug mode
-  debugPrintln("CAN mcu");
+  while(debugging && !Serial){} // Wait for serial if in debug mode
+  // debugPrintln("CAN mcu");
 
   // Steering momentary buttons
   for (int i = 0; i < NUM_BUTTONS; i++) {
@@ -99,7 +128,7 @@ void setup() {
 
   // Wait for CAN to begin
   while(!CAN.begin(bitrateCAN)){
-    debugPrintln("Starting CAN fail");
+    // debugPrintln("Starting CAN fail");
   }
 }
 
@@ -116,30 +145,23 @@ void loop() {
 
 
 // Encoder and Throttle to CAN
-void potToCAN(const int id, const int val, const String pot) {
+void potToCAN(int id, int val, const String name) {
   size_t size = sizeof(val);
   CAN.beginPacket(id);
-  const uint8_t data[size];           // Create char array
+  uint8_t data[size];           // Create uint8_t array
   memcpy(data, &val, size);  // Store bytes of val to array
   CAN.write(data, size);     // Write the buffer to CAN
   CAN.endPacket();
 
-  debugPrintln(pot + dash + val);
-}
-
-// From https://esp32io.com/tutorials/esp32-potentiometer
-float floatMap(float x, float in_min, float in_max, float out_min, float out_max) {
-  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+  // debugPrintln(pot + dash + val);
 }
 
 void encoderSend() {
-  int val = floatMap(analogRead(EncoderPin), 0, 4095, 0, 360); //Scale => [0,360]
-  potToCAN(encoderId, val, "Encoder");
+  potToCAN(encoderId, encoder.read(), encoder.name());
 }
 
 void throttleSend() {
-  int val = floatMap(analogRead(ThrottlePin), 0, 4095, 0, 100); //Scale => [0,100]
-  potToCAN(throttleId, val, "Throttle");
+  potToCAN(throttleId, throttle.read(), throttle.name());
 }
 
 
@@ -148,11 +170,11 @@ void buttonsSend() {
   for (int i = 0; i < NUM_BUTTONS; i++) {
     CAN.write(bool(digitalRead(buttons[i])));
 
-    debugPrintln(button_names[i] + dash + digitalRead(buttons[i]));
+    // debugPrintln(button_names[i] + dash + digitalRead(buttons[i]));
   }
   
   CAN.endPacket();
-  debugPrintln("Sent buttons");
+  // debugPrintln("Sent buttons");
 }
 
 
@@ -162,26 +184,26 @@ void LEDReceive() {
 
   if (packetSize && CAN.packetId() == LEDsId) {
     // received a packet
-    debugPrint("Received ");
+    // debugPrint("Received ");
 
     if (CAN.packetExtended()) {
-      debugPrint("extended ");
+      // debugPrint("extended ");
     }
 
     if (CAN.packetRtr()) {
       // Remote transmission request, packet contains no data
-      debugPrint("RTR ");
+      // debugPrint("RTR ");
     }
 
-    debugPrint("packet with id 0x");
-    debugPrint(CAN.packetId(), HEX);
+    // debugPrint("packet with id 0x");
+    // debugPrint(CAN.packetId(), HEX);
 
     if (CAN.packetRtr()) {
-      debugPrint(" and requested length ");
-      debugPrintln(CAN.packetDlc());
+      // debugPrint(" and requested length ");
+      // debugPrintln(CAN.packetDlc());
     } else {
-      debugPrint(" and length ");
-      debugPrintln(packetSize);
+      // debugPrint(" and length ");
+      // debugPrintln(packetSize);
 
       char data[packetSize];
 
@@ -192,29 +214,47 @@ void LEDReceive() {
         i++;
       }
 
-      debugPrint("LEDS: ");
+      // debugPrint("LEDS: ");
 
       // Iterate through the LEDs
       for (int i = 0; i < NUM_LEDS; i++) {
-        debugPrint((i+1) + dash);
+        // debugPrint((i+1) + dash);
 
         if (data[i]) { // 1 evaluates to true, 0 evaluates to false
   
-          debugPrintln(LED_ON);
+          // debugPrintln(LED_ON);
 
           digitalWrite(LEDs[i], HIGH);
         }
 
         else {
-          debugPrint(LED_OFF);
+          // debugPrint(LED_OFF);
 
           digitalWrite(LEDs[i], LOW);
         }
       }
 
-      debugPrintln();
+      // debugPrintln();
     }
 
-    debugPrintln();
+    // debugPrintln();
   }
+}
+
+
+
+/*
+
+-----------
+Calibration
+-----------
+
+(Cal is short for Calibration)
+
+*/
+
+// FIXME change to display on screen
+bool pot_cal(int pin, const String pot) {
+  Serial.print(pot);
+  Serial.println(" Calibration:");
 }
