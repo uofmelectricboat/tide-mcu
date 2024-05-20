@@ -74,12 +74,6 @@ const String button_names[NUM_BUTTONS] = {"Comms", "Trim Up", "Trim Down", "Gain
 
 int LEDs[NUM_LEDS] = {LED1, LED2, LED3, LED4, LED5, LED6};
 
-// For serial
-const String dash = " - ";
-const String LED_ON = "ON; ";
-const String LED_OFF = "OFF; ";
-
-
 #include <CAN.h>
 
 /*
@@ -101,28 +95,31 @@ CRX	| GPIO_4
 #define LEDsId     2001
 
 
-// uint16_t i = 0; // FIXME not sure why this is here, should delete it
-
-// FIXME instead use ESP32Logger or Arduino_DebugUtilis, or EasyLogger = can be compiled out
+// For logging
+#include <Arduino_DebugUtils.h>
 
 // Debug mode
-#define debugging true
+// Options in lowest to highest priority:
+// DBG_NONE, DBG_ERROR, DBG_WARNING, DBG_INFO (default), DBG_DEBUG, DBG_VERBOSE
+#define debuggingLevel DBG_DEBUG
 
 
   // Steering wheel encoder
-  Pot encoder(32,0,4095,0,360, "Encoder"); // pin, analog min & max, out min & max Scale => [0,360]
+  Pot encoder(32,0,4095,0,360, "Encoder"); // pin, analog min & max, out min & max; Scale => [0,360]
 
   // Throttle Potentiometer
-  Pot throttle(34,0,4095,0,100, "Throttle"); // pin, analog min & max, out min & max  Scale => [0,100]
+  Pot throttle(34,0,4095,0,100, "Throttle"); // pin, analog min & max, out min & max; Scale => [0,100]
 
 void setup() {
-  // debugMode(debugging);
 
+  Serial.begin(9600); // Can have Debug send to another stream if we want
 
-  Serial.begin(9600);
+  Debug.setDebugLevel(debuggingLevel);
+  Debug.timestampOn();
+  Debug.newlineOn(); // Send a new line after every message
 
-  while(debugging && !Serial){} // Wait for serial if in debug mode
-  // debugPrintln("CAN mcu");
+  while(debuggingLevel >= DBG_DEBUG && !Serial){} // Wait for serial only if in debug mode or higher
+  DEBUG_INFO("CAN mcu");
 
   // Steering momentary buttons
   for (int i = 0; i < NUM_BUTTONS; i++) {
@@ -138,7 +135,7 @@ void setup() {
 
   // Wait for CAN to begin
   while(!CAN.begin(bitrateCAN)){
-    // debugPrintln("Starting CAN fail");
+    DEBUG_WARNING("Starting CAN failure");
   }
 }
 
@@ -158,13 +155,19 @@ void loop() {
 void potToCAN(int id, int val, const String name) {
   size_t size = sizeof(val);
   CAN.beginPacket(id);
-  uint8_t data[size];           // Create uint8_t array
-  memcpy(data, &val, size);  // Store bytes of val to array
-  CAN.write(data, size);     // Write the buffer to CAN
-  CAN.endPacket();
-  delay
+  uint8_t data[size];                   // Create uint8_t array
+  memcpy(data, &val, size);             // Store bytes of val to array
+  size_t sent = CAN.write(data, size);  // Write the buffer to CAN
+  int end = CAN.endPacket();
 
-  // debugPrintln(pot + dash + val);
+  DEBUG_INFO("%s - %d", name, val);
+  if (sent < size) {
+    DEBUG_WARNING("Size of message sent < size of data");
+  } else {
+    DEBUG_INFO("All data sent");
+  }
+  DEBUG_VERBOSE("endPacket output: %d", end);
+
 }
 
 void encoderSend() {
@@ -175,84 +178,84 @@ void throttleSend() {
   potToCAN(throttleId, throttle.read(), throttle.name());
 }
 
-
 void buttonsSend() {
   CAN.beginPacket(buttonsId);
   for (int i = 0; i < NUM_BUTTONS; i++) {
-    CAN.write(bool(digitalRead(buttons[i])));
+    CAN.write(digitalRead(buttons[i]));
 
-    // debugPrintln(button_names[i] + dash + digitalRead(buttons[i]));
+    DEBUG_INFO("Button %s - %s", button_names[i], digitalRead(buttons[i]) ? "On" : "Off");
   }
   
-  CAN.endPacket();
-  // debugPrintln("Sent buttons");
+  int end = CAN.endPacket();
+
+  DEBUG_INFO("Sent buttons");
+
+  DEBUG_VERBOSE("endPacket output: %d", end);
 }
 
 
 void LEDReceive() {
+  DEBUG_INFO("Receiving LED messages");
+
   // try to parse packet
   int packetSize = CAN.parsePacket();
 
   if (packetSize && CAN.packetId() == LEDsId) {
-    // received a packet
-    // debugPrint("Received ");
+
+    DEBUG_DEBUG("Received...");
 
     if (CAN.packetExtended()) {
-      // debugPrint("extended ");
+      DEBUG_DEBUG("...extended...");
     }
+
+    DEBUG_DEBUG("...packet with id 0x%a...", CAN.packetId());
 
     if (CAN.packetRtr()) {
       // Remote transmission request, packet contains no data
-      // debugPrint("RTR ");
-    }
-
-    // debugPrint("packet with id 0x");
-    // debugPrint(CAN.packetId(), HEX);
-
-    if (CAN.packetRtr()) {
-      // debugPrint(" and requested length ");
-      // debugPrintln(CAN.packetDlc());
+      DEBUG_WARNING("(No Data Received for LEDs)");
+      DEBUG_DEBUG("...RTR and requested length %d", CAN.packetDlc());
+    
     } else {
-      // debugPrint(" and length ");
-      // debugPrintln(packetSize);
-
-      char data[packetSize];
+      DEBUG_DEBUG("...and length %d", packetSize);
+      uint8_t data[packetSize];
 
       // only print packet data for non-RTR packets
-      int i = 0;
+      int size = 0;
       while (CAN.available()) {
-        data[i] = CAN.read();
-        i++;
+        data[size] = CAN.read();
+        size++;
+      
       }
 
-      // debugPrint("LEDS: ");
+      int count = NUM_LEDS; // Default value
+
+      if (packetSize > NUM_LEDS) {
+        DEBUG_ERROR("More data received than number of LEDs, continuing with first %d", count);
+      }
+
+      if (packetSize < NUM_LEDS) {
+        count = packetSize;
+        DEBUG_ERROR("Less data received than number of LEDs, continuing with %d given", count);
+      }
+
+      DEBUG_INFO("LEDS:");
 
       // Iterate through the LEDs
-      for (int i = 0; i < NUM_LEDS; i++) {
-        // debugPrint((i+1) + dash);
-
-        if (data[i]) { // 1 evaluates to true, 0 evaluates to false
-  
-          // debugPrintln(LED_ON);
-
-          digitalWrite(LEDs[i], HIGH);
+      for (int i = 0; i < count; i++) {
+        DEBUG_INFO("LED %d - %s", i+1, data[i] ? "On" : "Off");
+        
+        if (data[i] > 1) {
+          DEBUG_ERROR("Non-binary value: %d, defaulting to on", data[i]);
         }
 
-        else {
-          // debugPrint(LED_OFF);
-
-          digitalWrite(LEDs[i], LOW);
-        }
-      }
-
-      // debugPrintln();
+        digitalWrite(LEDs[i], data[i] ? HIGH : LOW);
+      } 
     }
-
-    // debugPrintln();
+  }
+  else {
+    DEBUG_WARNING("No LED CAN messages received.");
   }
 }
-
-
 
 /*
 
@@ -269,24 +272,25 @@ Calibration
 Steps:
 1. Start calibration
 2. Indicate to user to start
-4. User moves to min position
-3. keep it there for 3 seconds
-3.  
+3. User moves to min position
+4. keep it there for lockTime number of milliseconds
+5. 
 
 */
-bool pot_cal(Pot &pot) {
-  Serial.print(pot.name());
-  Serial.println(" Calibration:");
 
+bool pot_cal(Pot &pot, int numTrials) {
+  DEBUG_INFO("%s Calibration:", pot.name());
 
-  // Number of data points to collect
-  const size_t numData = 300;
+  // Max number of data points to hold for each trial
+  const size_t numData = 500;
 
-  // Delay between data points (in FIXME-seconds)
-  const interval = 100;
+  // Number of seconds to wait for locking in the value (in milliseconds)
+  const int lockTime = 10000; // 1000 milliseconds = 1 second
 
-  
+  // Create two 2D arrays, one for each extrema
+  uint16_t mins[numTrials][numData];
+  uint16_t maxes[numTrials][numData];
 
+  return false; // XXX
 
-  Serial.println("")
 }
