@@ -31,6 +31,16 @@ class Pot {
     const String & name() {
       return pot_name;
     }
+
+    // MODIFIES : analog min value
+    void set_min(int analogVal) {
+      in_min = analogVal;
+    }
+
+    // MODIFIES : analog max value
+    void set_max(int analogVal) {
+      in_max = analogVal;
+    }
 };
 
 /*
@@ -152,6 +162,7 @@ void potToCAN(int id, int val, const String name) {
   memcpy(data, &val, size);  // Store bytes of val to array
   CAN.write(data, size);     // Write the buffer to CAN
   CAN.endPacket();
+  delay
 
   // debugPrintln(pot + dash + val);
 }
@@ -254,7 +265,28 @@ Calibration
 */
 
 // FIXME change to display on screen
-bool pot_cal(int pin, const String pot) {
-  Serial.print(pot);
+/*
+Steps:
+1. Start calibration
+2. Indicate to user to start
+4. User moves to min position
+3. keep it there for 3 seconds
+3.  
+
+*/
+bool pot_cal(Pot &pot) {
+  Serial.print(pot.name());
   Serial.println(" Calibration:");
+
+
+  // Number of data points to collect
+  const size_t numData = 300;
+
+  // Delay between data points (in FIXME-seconds)
+  const interval = 100;
+
+  
+
+
+  Serial.println("")
 }
