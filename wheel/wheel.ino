@@ -21,7 +21,7 @@ class Pot {
       pin(pin), in_min(in_min), in_max(in_max), out_min(out_max), pot_name(name) {}
 
     float read() {
-      floatMap(readRaw());
+      return floatMap(readRaw());
     }
 
     uint16_t readRaw() {
