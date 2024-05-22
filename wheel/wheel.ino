@@ -21,6 +21,9 @@ CRX	| GPIO_4
 // DBG_NONE, DBG_ERROR, DBG_WARNING, DBG_INFO (default), DBG_DEBUG, DBG_VERBOSE
 #define debuggingLevel DBG_DEBUG
 
+// Set whether to disable CAN (useful for debugging)
+#define DISABLECAN true
+
 // Can bitrate
 #define bitrateCAN 500E3
 
@@ -61,17 +64,6 @@ const String button_names[NUM_BUTTONS] = {"Comms", "Trim Up", "Trim Down", "Gain
 
 int LEDs[NUM_LEDS] = {LED1, LED2, LED3, LED4, LED5, LED6};
 
-#include <CAN.h>
-
-#define NUM_BUTTONS 5
-#define NUM_LEDS 6
-
-// Lists that contain the Steering Wheel buttons and the LED pins
-int buttons[NUM_BUTTONS] = {CommsPin, TrimUpPin, TrimDownPin, GainUpPin, GainDownPin};
-const String button_names[NUM_BUTTONS] = {"Comms", "Trim Up", "Trim Down", "Gain Up", "Gain Down"};
-
-int LEDs[NUM_LEDS] = {LED1, LED2, LED3, LED4, LED5, LED6};
-
 // Steering wheel encoder
 Mapped_Encoder encoder(32,0,4095,0,360, BITMAX12, "Encoder"); // Scale => [0,360]
 
@@ -86,13 +78,16 @@ void setup() {
   Debug.timestampOn();
   Debug.newlineOn(); // Send a new line after every message
 
-  while(debuggingLevel >= DBG_DEBUG && !Serial){} // Wait for serial only if in debug mode or higher
+  while(debuggingLevel >= DBG_DEBUG && !Serial) {
+    yield(); // Wait for serial only if in debug mode or higher
+  }
   DEBUG_INFO("CAN mcu");
 
   // Steering momentary buttons
   for (int i = 0; i < NUM_BUTTONS; i++) {
     pinMode(buttons[i], INPUT_PULLUP);
   }
+  DEBUG_VERBOSE("Setup Buttons");
 
   // Encoder & Potentiometer SHOULD NOT be set to input
   
@@ -100,29 +95,34 @@ void setup() {
   for (int i = 0; i < NUM_LEDS; i++) {
     pinMode(LEDs[i], OUTPUT);
   }
+  DEBUG_VERBOSE("Setup LEDs");
 
   // Wait for CAN to begin
   while(!CAN.begin(bitrateCAN)){
     DEBUG_WARNING("Starting CAN failure");
   }
+  DEBUG_VERBOSE("Setup CAN");
 }
 
 void loop() {
 
-  potToCAN(encoderId, encoder.read(), encoder.name());
+  encoderToCAN(encoderId, encoder.read(), encoder.name());
 
-  potToCAN(throttleId, throttle.read(), throttle.name());
+  encoderToCAN(throttleId, throttle.read(), throttle.name());
 
   buttonsSend();
 
   LEDReceive();
+
+  delay(1000);
+
 }
 
 
 // Encoder and Throttle to CAN
-void potToCAN(int id, int val, const String name) {
+void encoderToCAN(int id, int val, const String name) {
   size_t size = sizeof(val);
-  CAN.beginPacket(id);
+  if (!DISABLECAN) {CAN.beginPacket(id);}
   uint8_t data[size];                   // Create uint8_t array
   memcpy(data, &val, size);             // Store bytes of val to array
   size_t sent = CAN.write(data, size);  // Write the buffer to CAN
@@ -140,7 +140,7 @@ void potToCAN(int id, int val, const String name) {
 
 
 void buttonsSend() {
-  CAN.beginPacket(buttonsId);
+  if (!DISABLECAN) {CAN.beginPacket(buttonsId);}
   for (int i = 0; i < NUM_BUTTONS; i++) {
     CAN.write(digitalRead(buttons[i]));
 
@@ -239,19 +239,125 @@ Steps:
 
 */
 
-bool pot_cal(Mapped_Encoder &pot, int numTrials) {
-  DEBUG_INFO("%s Calibration:", pot.name());
+bool encoder_cal(Mapped_Encoder &encoder, int numTrials, float tol) {
+  Serial.printf("%s Calibration:\n", encoder.name());
 
-  // Max number of data points to hold for each trial
-  const size_t numData = 500;
+  // // Max number of data points to hold for each trial
+  // const size_t numData = 100; //encoder.get_analogMax();
 
   // Number of seconds to wait for locking in the value (in milliseconds)
   const int lockTime = 10000; // 1000 milliseconds = 1 second
 
   // Create two 2D arrays, one for each extrema
-  uint16_t mins[numTrials][numData];
-  uint16_t maxes[numTrials][numData];
+  float mins[numTrials];
+  float maxes[numTrials];
 
-  return false; // XXX
+  for (size_t trial = 0; trial < numTrials; trial++) {
+    Serial.printf("Trial #%d \n", trial+1);
 
+    Serial.println("Move the wheel clockwise to its right maximum");
+
+    mins[trial] = encoder_find_extrema(encoder, lockTime, tol);
+
+    Serial.println("Now move the wheel counterclockwise to its left maximum");
+
+    maxes[trial] = encoder_find_extrema(encoder, lockTime, tol);
+  }
+
+  String issue = "none";
+  for (size_t i = 1; i < numTrials; i++) {
+    if (!check_tol(mins[i-1], mins[i], tol, encoder.get_analogMax())) {
+      issue = "min";
+    }
+    else if (!check_tol(maxes[i-1], maxes[i], tol, encoder.get_analogMax())) {
+      issue = "max";
+    }
+    
+    if (issue != "none") {
+      Serial.printf("Values for %s trials are not within tolerance of each other, please try calibration again\n", issue);
+    }
+
+  }
+  
+}
+
+// EFFECTS: 
+float encoder_find_extrema(Mapped_Encoder &encoder, const int lockTime, float tol) {
+  // Make an array to hold the values
+  uint16_t data[lockTime];
+  data[0] = 0;
+  size_t index = 1;
+
+  uint16_t val;
+
+
+  while (index != lockTime) {
+    val = encoder.readRaw();
+
+    if (!check_tol(data[index-1], val, tol, encoder.get_analogMax())) {
+      index = 0;
+      Serial.println("Restart, not within tolerance");
+    }
+
+    data[index] = val;
+    index++;
+
+    delay(1);
+  }
+
+  float average = avg_analog(data, lockTime, tol, encoder.get_analogMax());
+
+  Serial.printf("Found extrema: %f\n", average);
+
+  return average;
+
+}
+
+
+float avg_analog(uint16_t * arr, size_t numData, float tol, int analogMax) {
+  int numAboveMax, numBelowMax = 0; // In special case where values wrap around
+
+  int tolMax = analogMax - tol;
+
+  float average = 0;
+
+  for (size_t i = 0; i < numData; i++) {
+    average += arr[i];
+
+    if (arr[i] >= tolMax) { // 0 <= val <= tol
+      numBelowMax++;
+    }
+    else if (arr[i] <= tol) { // max - tol <= val <= max
+      numAboveMax++;
+    }
+  }
+
+  // Special cases near analogMax
+
+  // If most values lean to above the max
+  if (numBelowMax <= numAboveMax) {
+    average -= numBelowMax * analogMax;
+  }
+  // If most values lean to below the max
+  else if (numAboveMax < numBelowMax) {
+    average += numAboveMax * analogMax;
+  }
+
+  // Divide by the number and return
+  return average / numData;
+}
+
+// EFFECTS: returns if two values are within tolerance
+// considering both the base case and when values pass over analogMax
+bool check_tol(uint16_t lhs, uint16_t rhs, float tol, int analogMax) {
+  // In the case of values near 0 / analogMax
+  int tolMax = analogMax - tol;
+  if ((lhs >= tolMax && rhs <= tol) || (rhs >= tolMax && lhs <= tol)) {
+    return true;
+  }
+
+  // Base case
+  else {
+    return abs(lhs - rhs) <= tol;
+  }
 }

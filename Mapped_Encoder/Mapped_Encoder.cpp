@@ -50,3 +50,8 @@ float Mapped_Encoder::floatMap(float x) {
   
   return (x - in_min) * (out_max - out_min) / abs(in_max - in_min) + out_min;
 }
+
+int Mapped_Encoder::get_analogMax() {
+  return analogMax;
+}
+

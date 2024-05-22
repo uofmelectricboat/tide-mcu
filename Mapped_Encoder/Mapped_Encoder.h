@@ -35,6 +35,8 @@ class Mapped_Encoder {
     void set_max(int analogVal);
 
     float floatMap(float x);
+
+    int get_analogMax();
 };
 
 #endif
