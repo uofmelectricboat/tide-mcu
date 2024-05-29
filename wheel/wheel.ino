@@ -22,7 +22,7 @@ CRX	| GPIO_4
 #define debuggingLevel DBG_DEBUG
 
 // Set whether to disable CAN (useful for debugging)
-#define DISABLECAN true
+#define DISABLECAN false
 
 // Can bitrate
 #define bitrateCAN 500E3
@@ -114,15 +114,16 @@ void loop() {
 
   LEDReceive();
 
-  delay(1000);
+  // delay(1000);  // For testing to make it easier to read values in serial
 
 }
 
 
 // Encoder and Throttle to CAN
 void encoderToCAN(int id, int val, const String name) {
+  if (DISABLECAN) {return;}
   size_t size = sizeof(val);
-  if (!DISABLECAN) {CAN.beginPacket(id);}
+  CAN.beginPacket(id);
   uint8_t data[size];                   // Create uint8_t array
   memcpy(data, &val, size);             // Store bytes of val to array
   size_t sent = CAN.write(data, size);  // Write the buffer to CAN
@@ -140,7 +141,8 @@ void encoderToCAN(int id, int val, const String name) {
 
 
 void buttonsSend() {
-  if (!DISABLECAN) {CAN.beginPacket(buttonsId);}
+  if (DISABLECAN) {return;}
+  CAN.beginPacket(buttonsId);
   for (int i = 0; i < NUM_BUTTONS; i++) {
     CAN.write(digitalRead(buttons[i]));
 
@@ -232,14 +234,17 @@ Calibration
 /*
 Steps:
 1. Start calibration
-2. Indicate to user to start
+2. Indicate to user to move to min
 3. User moves to min position
-4. keep it there for lockTime number of milliseconds
-5. 
-
+4. User keeps it there for lockTime number of milliseconds
+5. Indicate to user to move to max
+6. User moves to max postion
+7. User keeps it there for lockTime number of milliseconds
+8. Repeat steps 2-7 for the number of trials
+9. If the trial means are within tolerance of each other, continue
+10. Update the encoder's value both in the object and in EEPROM
 */
-
-bool encoder_cal(Mapped_Encoder &encoder, int numTrials, float tol) {
+int encoder_cal(Mapped_Encoder &encoder, int numTrials, float tol) {
   Serial.printf("%s Calibration:\n", encoder.name());
 
   // // Max number of data points to hold for each trial
@@ -264,31 +269,41 @@ bool encoder_cal(Mapped_Encoder &encoder, int numTrials, float tol) {
     maxes[trial] = encoder_find_extrema(encoder, lockTime, tol);
   }
 
-  String issue = "none";
+  int issue = 0;
   for (size_t i = 1; i < numTrials; i++) {
     if (!check_tol(mins[i-1], mins[i], tol, encoder.get_analogMax())) {
-      issue = "min";
+      issue += 1;
     }
-    else if (!check_tol(maxes[i-1], maxes[i], tol, encoder.get_analogMax())) {
-      issue = "max";
+    else if (!check_tol(maxes[i-1], maxes[i], tol, encoder.get_analogMax())) { // Doesn't check max if min is true
+      issue += 2;
+
     }
-    
-    if (issue != "none") {
-      Serial.printf("Values for %s trials are not within tolerance of each other, please try calibration again\n", issue);
+
+    if (issue > 0) {
+      Serial.printf("Values for %s trials are not within tolerance of each other, \
+      please try calibration again\n", issue == 1 ? "min" : "max");
+
+      // Don't change the encoder's values
+      return issue;
     }
 
   }
-  
+
+  // If all the values are generally within tolerance of each other,
+  // find the mean min and max of all trials since all trials have equal sizes
+  encoder.set_min(round(avg_analog(mins, numTrials, tol, encoder.get_analogMax())));
+  encoder.set_max(round(avg_analog(maxes, numTrials, tol, encoder.get_analogMax())));
+
+  return issue;
 }
 
-// EFFECTS: 
+// EFFECTS: Collects data once the wheel has stopped moving for lockTime milliseconds
 float encoder_find_extrema(Mapped_Encoder &encoder, const int lockTime, float tol) {
   // Make an array to hold the values
-  uint16_t data[lockTime];
+  float data[lockTime]; // If there are memory space issues, we could make this uint16_t
   data[0] = 0;
   size_t index = 1;
-
-  uint16_t val;
+  float val;
 
 
   while (index != lockTime) {
@@ -296,7 +311,7 @@ float encoder_find_extrema(Mapped_Encoder &encoder, const int lockTime, float to
 
     if (!check_tol(data[index-1], val, tol, encoder.get_analogMax())) {
       index = 0;
-      Serial.println("Restart, not within tolerance");
+      Serial.println("Restart, steering wheel moved");
     }
 
     data[index] = val;
@@ -314,7 +329,7 @@ float encoder_find_extrema(Mapped_Encoder &encoder, const int lockTime, float to
 }
 
 
-float avg_analog(uint16_t * arr, size_t numData, float tol, int analogMax) {
+float avg_analog(float * arr, size_t numData, float tol, int analogMax) {
   int numAboveMax, numBelowMax = 0; // In special case where values wrap around
 
   int tolMax = analogMax - tol;
@@ -349,7 +364,7 @@ float avg_analog(uint16_t * arr, size_t numData, float tol, int analogMax) {
 
 // EFFECTS: returns if two values are within tolerance
 // considering both the base case and when values pass over analogMax
-bool check_tol(uint16_t lhs, uint16_t rhs, float tol, int analogMax) {
+bool check_tol(float lhs, float rhs, float tol, int analogMax) {
   // In the case of values near 0 / analogMax
   int tolMax = analogMax - tol;
   if ((lhs >= tolMax && rhs <= tol) || (rhs >= tolMax && lhs <= tol)) {

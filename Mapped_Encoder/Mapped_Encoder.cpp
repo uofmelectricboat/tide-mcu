@@ -5,6 +5,7 @@
 
 #include "Arduino.h"
 #include "Mapped_Encoder.h"
+#include <EEPROM.h>
 
 // EFFECTS: sets the passes zero state for use by the floatMap
 void Mapped_Encoder::set_passes_zero() {
