@@ -14,7 +14,7 @@ CTX	| GPIO_5
 CRX	| GPIO_4
 */
 
-#include <Mapped_Encoder.h> // Ecoder and throttle
+#include "Mapped_Encoder.h" // Ecoder and throttle
 
 // Debug mode
 // Options in lowest to highest priority:
