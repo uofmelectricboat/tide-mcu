@@ -15,4 +15,4 @@ All ```.ino``` files that are on TIDE's systems.
 - [CAN](https://github.com/sandeepmistry/arduino-CAN)
 - [Arduino_DebugUtils](https://github.com/arduino-libraries/Arduino_DebugUtils)
 - [Mapped_Encoder](Mapped_Encoder/Mapped_Encoder.h)
-  - included in cockpit's folder
+  - Included in cockpit's folder

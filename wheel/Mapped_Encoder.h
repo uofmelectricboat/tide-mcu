@@ -8,35 +8,53 @@
 
 #include "Arduino.h"
 
+#include <EEPROM.h>
+
 #define BITMAX10 1023
 #define BITMAX12 4095
+
+// To check if the EEPROM is empty
+#define __signature 602
 
 class Mapped_Encoder {
   private:
     int pin;
-    int in_min;
-    int in_max;
-    int out_min;
-    int out_max;
+    const uint16_t analogMax;
 
-    const int analogMax;
+    uint32_t out_min;
+    uint32_t out_max;
+
     const String _name;
-    bool passes_zero;
 
     void set_passes_zero();
-  
+
+    void update_EEPROM();
+
+    struct EEPROMVals {
+      uint8_t signature;
+      uint16_t min;
+      uint16_t max;
+      bool passes_zero;
+    };
+
+    EEPROMVals inVals;
+    int eeAddress;
+
   public:
-    Mapped_Encoder(int pin, int in_min, int in_max, int out_min, int out_max, const int analogMax, const String name);
+    Mapped_Encoder(int pin, int eeAddress, const uint16_t analogMax, uint32_t out_min, uint32_t out_max, const String name);
 
-    float read();
-    uint16_t readRaw();
-    const String & name();
-    void set_min(int analogVal);
-    void set_max(int analogVal);
+    float read() const;
+    uint16_t readRaw() const;
 
-    float floatMap(float x);
+    const String & name() const;
 
-    int get_analogMax();
+    void set_analog_vals(uint16_t min, uint16_t max);
+
+    float floatMap(float x) const;
+
+    uint16_t get_analogMax() const;
+
+    int get_EEPROM_usage() const;
 };
 
 #endif

@@ -1,5 +1,6 @@
 /*
-  Mapped_Encoder.cpp - Library for getting input from a potentiometer or encoder and mapping it
+  Mapped_Encoder.cpp - Library for getting input from a potentiometer or encoder, mapping it, 
+  and storing its settings in EEPROM
   Created by David Anapolsky, May 21, 2024.
 */
 
@@ -7,52 +8,73 @@
 #include "Mapped_Encoder.h"
 #include <EEPROM.h>
 
-// EFFECTS: sets the passes zero state for use by the floatMap
+// MODIFIES : passes zero boolean
+// EFFECTS  : sets the passes zero state for use by the floatMap
 void Mapped_Encoder::set_passes_zero() {
-  passes_zero = in_min > in_max;
+  inVals.passes_zero = (inVals.min > inVals.max);
 }
 
-Mapped_Encoder::Mapped_Encoder(int pin, int in_min, int in_max, int out_min, int out_max, const int analogMax, const String name) : 
-  pin(pin), in_min(in_min), in_max(in_max), out_min(out_max), analogMax(analogMax), _name(name) {
-    set_passes_zero();
+// MODIFIES : EEPROM
+void Mapped_Encoder::update_EEPROM() {
+  EEPROM.put(eeAddress, inVals);
+}
+
+Mapped_Encoder::Mapped_Encoder(int pin, int eeAddress, const uint16_t analogMax, uint32_t out_min, uint32_t out_max, const String name) : 
+  pin(pin), eeAddress(eeAddress), analogMax(analogMax), out_min(out_min), out_max(out_max), _name(name) {
+    
+    EEPROM.get(eeAddress, inVals);
+
+    // Set to default values if the signature doesn't match
+    if (inVals.signature != __signature) {
+      inVals.signature = __signature;
+      inVals.min = 0;
+      inVals.max = analogMax;
+
+      set_passes_zero();
+      update_EEPROM();
+    }
   }
 
-float Mapped_Encoder::read() {
+float Mapped_Encoder::read() const {
   return floatMap(readRaw());
 }
 
-uint16_t Mapped_Encoder::readRaw() {
+uint16_t Mapped_Encoder::readRaw() const {
   return analogRead(pin);
 }
 
-const String & Mapped_Encoder::name() {
+const String & Mapped_Encoder::name() const{
   return _name;
 }
 
-// MODIFIES : analog min value
-void Mapped_Encoder::set_min(int analogVal) {
-  in_min = analogVal;
+// REQUIRES : min and max are unsigned integers
+// MODIFIES : analog min and max values, passes zero, and EEPROM
+// EFFECTS  : mapping of analog reading
+void Mapped_Encoder::set_analog_vals(uint16_t min, uint16_t max) {
+  inVals.min = min;
+  inVals.max = max;
 
   set_passes_zero();
+
+  update_EEPROM();
 }
 
-// MODIFIES : analog max value
-void Mapped_Encoder::set_max(int analogVal) {
-  in_max = analogVal;
-
-  set_passes_zero();
-}
-
-float Mapped_Encoder::floatMap(float x) {
-  if (passes_zero && x < in_max) {
-    // Add the absolute max in to x
-    x += analogMax;
+// REQUIRES : val is a valid analog value
+// EFFECTS  : returns the analog values mapped to the range of the output values
+float Mapped_Encoder::floatMap(float val) const {
+  if (inVals.passes_zero && val < inVals.max) {
+    // Add the analogMax to val
+    val += analogMax;
   }
   
-  return (x - in_min) * (out_max - out_min) / abs(in_max - in_min) + out_min;
+  return (val - inVals.min) * (out_max - out_min) / abs(inVals.max - inVals.min) + out_min;
 }
 
-int Mapped_Encoder::get_analogMax() {
+uint16_t Mapped_Encoder::get_analogMax() const {
   return analogMax;
 }
 
+// EFFECTS  : returns the number of bytes used in EEPROM
+int Mapped_Encoder::get_EEPROM_usage() const {
+  return sizeof(inVals);
+}
