@@ -1,6 +1,39 @@
+// Main wheel code
+
+#include <Arduino_DebugUtils.h> // Logging
+
+#include <CAN.h> // CAN
 /*
-All the quotes are from here: https://randomnerdtutorials.com/esp32-pinout-reference-gpios/
+CAN default pins
+CAN | ESP32
+3V3	| 3V3
+GND	| GND
+CTX	| GPIO_5
+CRX	| GPIO_4
 */
+
+#include "Mapped_Encoder.h" // Encoder and throttle
+
+// Debug mode
+// Options in lowest to highest priority:
+// DBG_NONE, DBG_ERROR, DBG_WARNING, DBG_INFO (default), DBG_DEBUG, DBG_VERBOSE
+#define debuggingLevel DBG_INFO
+
+// Set whether to disable CAN (useful for debugging)
+#define DISABLECAN false
+
+// Calibration settings
+#define calTol 10
+#define calNumTrials 3
+
+// Can bitrate
+#define bitrateCAN 500E3
+
+// CAN Ids
+#define encoderId  1999
+#define throttleId 1998
+#define buttonsId  2000
+#define LEDsId     2001
 
 /*
 Steering Wheel Buttons
@@ -9,18 +42,11 @@ All should be set to pullup, using the ESP32's internal pullup resistors
 
 E-stop (A-BRB) is intentionally not included
 */
-#define CommsPin 12    // Top Right Button (B-TRB) // "boot fails if pulled high, strapping pin" = works fine
-#define TrimUpPin 14    // Right Paddle (C-RPD) // "outputs PWM signal at boot"
+#define CommsPin 12    // Top Right Button (B-TRB)
+#define TrimUpPin 14    // Right Paddle (C-RPD) // may output PWM signal at boot
 #define TrimDownPin 27  // Left Paddle (E-LPD)
 #define GainUpPin 26    // Top Left Button (F-TLB)
 #define GainDownPin 25  // Bottom Left Button (G-BLB)
-
-
-// Steering wheel encoder
-#define EncoderPin 32 // Two away from the throttle pin
-
-// Throttle Potentiometer
-#define ThrottlePin 34 // Should not be set to input, "input only"
 
 // Switchboard Green LEDs
 // Connected to the LED's positive leads, i.e. the red wire
@@ -31,216 +57,376 @@ E-stop (A-BRB) is intentionally not included
 #define LED5 18
 #define LED6 17
 
-/*
-CAN default pins
-CAN | ESP32
-3V3	| 3V3
-GND	| GND
-CTX	| GPIO_5
-CRX	| GPIO_4
-*/
-#include <CAN.h>
+// Lists that contain the steering wheel buttons and LED pins
+#define NUM_BUTTONS 5
+#define NUM_LEDS 6
 
-int encoderVal = 0;
-int throttleVal = 0;
-uint16_t i = 0;
+int buttons[NUM_BUTTONS] = {CommsPin, TrimUpPin, TrimDownPin, GainUpPin, GainDownPin};
+const String button_names[NUM_BUTTONS] = {"Comms", "Trim Up", "Trim Down", "Gain Up", "Gain Down"};
+
+int LEDs[NUM_LEDS] = {LED1, LED2, LED3, LED4, LED5, LED6};
+
+// Steering wheel encoder
+Mapped_Encoder encoder(32, BITMAX12, 0, 360, "Encoder"); // Scale => [0,360]
+
+// Throttle potentiometer
+Mapped_Encoder throttle(34, BITMAX12, 0, 100, "Throttle"); // Scale => [0,100]
+
+
+// Calibration Button Combos
+int encoderCalCombo[NUM_BUTTONS] = {1, 1, 1, 0, 0};
+int throttleCalCombo[NUM_BUTTONS] = {1, 0, 0, 1, 1};
+
 
 void setup() {
-  Serial.begin(9600);
 
-  while(!Serial){}
+  Serial.begin(9600); // Can have Debug send to another stream if we want
 
-  Serial.println("CAN mcu");
+  Debug.setDebugLevel(debuggingLevel);
+  Debug.timestampOn();
+  Debug.newlineOn(); // Send a new line after every message
+
+  while(debuggingLevel >= DBG_DEBUG && !Serial) {
+    yield(); // Wait for serial only if in debug mode or higher
+  }
+  DEBUG_INFO("CAN mcu");
 
   // Steering momentary buttons
-  pinMode(CommsPin, INPUT_PULLUP);
-  pinMode(GainUpPin, INPUT_PULLUP);
-  pinMode(TrimUpPin, INPUT_PULLUP);
-  pinMode(TrimDownPin, INPUT_PULLUP);
-  pinMode(GainDownPin, INPUT_PULLUP);
+  for (int i = 0; i < NUM_BUTTONS; i++) {
+    pinMode(buttons[i], INPUT_PULLUP);
+  }
+  DEBUG_VERBOSE("Setup Buttons");
 
-  // Encoder & Potentiometer should NOT be set to input
+  // Encoder & Potentiometer SHOULD NOT be set to input
   
   // Switchboard LEDs
-  pinMode(LED1, OUTPUT);
-  pinMode(LED2, OUTPUT);
-  pinMode(LED3, OUTPUT);
-  pinMode(LED4, OUTPUT);
-  pinMode(LED5, OUTPUT);
-  pinMode(LED6, OUTPUT);
-
-  if(!CAN.begin(500E3)){
-    Serial.println("Starting CAN fail");
-    while(1);
+  for (int i = 0; i < NUM_LEDS; i++) {
+    pinMode(LEDs[i], OUTPUT);
   }
+  DEBUG_VERBOSE("Setup LEDs");
 
-
+  // Wait for CAN to begin
+  while(!CAN.begin(bitrateCAN)){
+    DEBUG_WARNING("Starting CAN failure");
+  }
+  DEBUG_VERBOSE("Setup CAN");
 }
 
 void loop() {
 
-  encoderVal = readEncoder();
+  encoderToCAN(encoderId, encoder.read(), encoder.name());
 
-  // Encoder testing
-  Serial.print("Encoder: ");
-  Serial.println(encoderVal);
+  encoderToCAN(throttleId, throttle.read(), throttle.name());
 
-  encodertoCAN(encoderVal);
-
-  throttleVal = readThrottle();
-
-  // Throttle testing
-  Serial.print("Throttle: ");
-  Serial.println(throttleVal);
-  delay(500);
-
-  throttletoCAN(throttleVal);
-
-  buttonstoCAN();
+  buttonsSend();
 
   LEDReceive();
-}
 
-// From https://esp32io.com/tutorials/esp32-potentiometer
-float floatMap(float x, float in_min, float in_max, float out_min, float out_max) {
-  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-}
-
-float readEncoder(){
-    return floatMap(analogRead(ThrottlePin), 0, 4095, 0, 360); //Scale => [0,360]
+  delay(1000);  // For testing to make it easier to read values in serial
 
 }
 
-float readThrottle(){
-  return floatMap(analogRead(ThrottlePin), 0, 4095, 0, 100); //Scale => [0,100]
-}
+// Encoder and Throttle to CAN
+void encoderToCAN(int id, int val, const String name) {
+  if (DISABLECAN) {return;}
+  size_t size = sizeof(val);
+  CAN.beginPacket(id);
+  uint8_t data[size];                   // Create uint8_t array
+  memcpy(data, &val, size);             // Store bytes of val to array
+  size_t sent = CAN.write(data, size);  // Write the buffer to CAN
+  int end = CAN.endPacket();
 
-void encodertoCAN(int val){
-  CAN.beginPacket(1999);
-  char data[sizeof(val)];               //Create char array
-  memcpy(data, &val, sizeof(val));       //Store bytes of val to array
-  for(int j = 0; j < sizeof(val); j++){  //Write bytes one by one to CAN
-    CAN.write(data[j]);
+  DEBUG_INFO("%s - %d", name, val);
+  if (sent < size) {
+    DEBUG_WARNING("Size of message sent < size of data");
+  } else {
+    DEBUG_INFO("All data sent");
   }
-  CAN.endPacket();
+  DEBUG_VERBOSE("endPacket output: %d", end);
+
 }
 
-void throttletoCAN(int val){
-  CAN.beginPacket(1998);
-  char data[sizeof(val)];                //Create char array
-  memcpy(data, &val, sizeof(val));       //Store bytes of val to array
-  for(int j = 0; j < sizeof(val); j++){  //Write bytes one by one to CAN
-    CAN.write(data[j]);
+void buttonsSend() {
+  // Check if a calibration button combo is pressed
+  checkButtonCombo();
+
+  if (DISABLECAN) {return;}
+  CAN.beginPacket(buttonsId);
+  for (int i = 0; i < NUM_BUTTONS; i++) {
+    CAN.write(!digitalRead(buttons[i]));
+
+    DEBUG_INFO("Button %s - %s", button_names[i], !digitalRead(buttons[i]) ? "On" : "Off");
   }
-  CAN.endPacket();
+  
+  int end = CAN.endPacket();
+
+  DEBUG_INFO("Sent buttons");
+
+  DEBUG_VERBOSE("endPacket output: %d", end);
 }
-
-/*----------------------------------
-IDs
-2000
------------------------------------*/
-void buttonstoCAN(){
-  CAN.beginPacket(2000);
-  CAN.write(bool(digitalRead(CommsPin)));
-  CAN.write(bool(digitalRead(TrimUpPin)));
-  CAN.write(bool(digitalRead(TrimDownPin)));
-  CAN.write(bool(digitalRead(GainUpPin)));
-  CAN.write(bool(digitalRead(GainDownPin)));
-
-  //  Button testing
-  Serial.print("Comms: ");
-  Serial.println(bool(digitalRead(CommsPin)));
-  Serial.print("Trim Up: ");
-  Serial.println(bool(digitalRead(TrimUpPin)));
-  Serial.print("Trim Down: ");
-  Serial.println(bool(digitalRead(TrimDownPin)));
-  Serial.print("Gain Up: ");
-  Serial.println(bool(digitalRead(GainUpPin)));
-  Serial.print("Gain Down: ");
-  Serial.println(bool(digitalRead(GainDownPin)));
-
-  CAN.endPacket();
-  Serial.println("sent");
-}
-
 
 void LEDReceive() {
+  DEBUG_INFO("Receiving LED messages");
 
-    // try to parse packet
+  // try to parse packet
   int packetSize = CAN.parsePacket();
 
-  if (packetSize && CAN.packetId() == 2001) {
-    // received a packet
-    Serial.print("Received ");
+  if (packetSize && CAN.packetId() == LEDsId) {
+
+    DEBUG_DEBUG("Received...");
 
     if (CAN.packetExtended()) {
-      Serial.print("extended ");
+      DEBUG_DEBUG("...extended...");
     }
+
+    DEBUG_DEBUG("...packet with id 0x%a...", CAN.packetId());
 
     if (CAN.packetRtr()) {
       // Remote transmission request, packet contains no data
-      Serial.print("RTR ");
-    }
-
-    Serial.print("packet with id 0x");
-    Serial.print(CAN.packetId(), HEX);
-
-    if (CAN.packetRtr()) {
-      Serial.print(" and requested length ");
-      Serial.println(CAN.packetDlc());
+      DEBUG_WARNING("(No Data Received for LEDs)");
+      DEBUG_DEBUG("...RTR and requested length %d", CAN.packetDlc());
+    
     } else {
-      Serial.print(" and length ");
-      Serial.println(packetSize);
-
-      char data[packetSize];
+      DEBUG_DEBUG("...and length %d", packetSize);
+      uint8_t data[packetSize];
 
       // only print packet data for non-RTR packets
-      int i = 0;
+      int size = 0;
       while (CAN.available()) {
-        data[i] = CAN.read();
-        i++;
+        data[size] = CAN.read();
+        size++;
+      
       }
 
-      if(data[0] == 1){
-        digitalWrite(LED1, HIGH);
-        Serial.print("recieve yay");
-      }else{
-        digitalWrite(LED1, LOW);
+      int count = NUM_LEDS; // Default value
+
+      if (packetSize > NUM_LEDS) {
+        DEBUG_ERROR("More data received than number of LEDs, continuing with first %d", count);
       }
 
-      if(data[1] == 1){
-        digitalWrite(LED2, HIGH);
-        Serial.print("LED2");
-      }else{
-        digitalWrite(LED2, LOW);
+      if (packetSize < NUM_LEDS) {
+        count = packetSize;
+        DEBUG_ERROR("Less data received than number of LEDs, continuing with %d given", count);
       }
 
-      if(data[2] == 1){
-        digitalWrite(LED3, HIGH);
-      }else{
-        digitalWrite(LED3, LOW);
-      }
+      DEBUG_INFO("LEDS:");
 
-      if(data[3] == 1){
-        digitalWrite(LED4, HIGH);
-      }else{
-        digitalWrite(LED4, LOW);
-      }
+      // Iterate through the LEDs
+      for (int i = 0; i < count; i++) {
+        DEBUG_INFO("LED %d - %s", i+1, data[i] ? "On" : "Off");
+        
+        if (data[i] > 1) {
+          DEBUG_ERROR("Non-binary value: %d, defaulting to on", data[i]);
+        }
 
-      if(data[4] == 1){
-        digitalWrite(LED5, HIGH);
-      }else{
-        digitalWrite(LED5, LOW);
-      }
+        digitalWrite(LEDs[i], data[i] ? HIGH : LOW);
+      } 
+    }
+  }
+  else {
+    DEBUG_WARNING("No LED CAN messages received.");
+  }
+}
 
-      if(data[5] == 1){
-        digitalWrite(LED6, HIGH);
-      }else{
-        digitalWrite(LED6, LOW);
-      }
-      Serial.println();
+/*
+
+-----------
+Calibration
+-----------
+
+(Cal is short for Calibration)
+
+*/
+
+// EFFECTS  : starts calibration if one of the button combos is pressed
+int checkButtonCombo() {
+  DEBUG_DEBUG("Checking button combos");
+  bool encoderMatch, throttleMatch;
+  encoderMatch = throttleMatch = true;
+  int val;
+
+  for (int i = 0; i < NUM_BUTTONS; i++) {
+    val = !digitalRead(buttons[i]);
+    DEBUG_DEBUG("Button %s - %s", button_names[i], val ? "On" : "Off");
+
+    if (encoderMatch && val != encoderCalCombo[i]) {
+      encoderMatch = false;
+      DEBUG_DEBUG("Encoder combo button non match");
     }
 
-    Serial.println();
+    if (throttleMatch && val != throttleCalCombo[i]) {
+      throttleMatch = false;
+      DEBUG_DEBUG("Throttle combo button non match");
+    }
+  }
+
+  DEBUG_DEBUG("Done checking button combos");
+  DEBUG_DEBUG("EncoderMatch: %d", encoderMatch);
+  DEBUG_DEBUG("ThrottleMatch: %d", throttleMatch);
+
+  if (encoderMatch) {
+    return encoderCal(encoder, calNumTrials, calTol);
+  }
+
+  else if (throttleMatch) {
+    return encoderCal(throttle, calNumTrials, calTol);
+  }
+
+  // Else, return 0
+  return 0;
+}
+
+// FIXME change to display on screen
+/*
+Steps:
+1. Start calibration
+2. Indicate to user to move to min
+3. User moves to min position
+4. User keeps it there for lockTime number of milliseconds
+5. Indicate to user to move to max
+6. User moves to max postion
+7. User keeps it there for lockTime number of milliseconds
+8. Repeat steps 2-7 for the number of trials
+9. If the trial means are within tolerance of each other, continue
+10. Update the encoder's value both in the object and in EEPROM
+*/
+int encoderCal(Mapped_Encoder &encoder, int numTrials, float tol) {
+  Serial.printf("%s Calibration:\n", encoder.name());
+
+  //  Max number of data points to hold for each trial
+  const int numData = 100;
+
+  // Number of seconds to wait for locking in the value (in milliseconds)
+  const int lockTime = 10000; // 1000 milliseconds = 1 second
+
+  // Create two 2D arrays, one for each extrema
+  float mins[numTrials];
+  float maxes[numTrials];
+
+  for (size_t trial = 0; trial < numTrials; trial++) {
+    Serial.printf("Trial #%d \n", trial+1);
+
+    Serial.println("Move the wheel clockwise to its right maximum / take your foot all the way off the throttle");
+
+    mins[trial] = encoder_find_extrema(encoder, numData, lockTime, tol);
+
+    Serial.println("Now move the wheel counterclockwise to its left maximum / press the throttle to its max");
+
+    maxes[trial] = encoder_find_extrema(encoder, numData, lockTime, tol);
+  }
+
+  int issue = 0;
+  for (size_t i = 1; i < numTrials; i++) {
+    if (!check_tol(mins[i-1], mins[i], tol, encoder.get_analogMax())) {
+      issue += 1;
+    }
+    else if (!check_tol(maxes[i-1], maxes[i], tol, encoder.get_analogMax())) { // Doesn't check max if min is true
+      issue += 2;
+
+    }
+
+    if (issue > 0) {
+      Serial.printf("Values for %s trials are not within tolerance of each other, \
+      please try calibration again\n", issue == 1 ? "min" : "max");
+
+      // Don't change the encoder's values
+      return issue;
+    }
+    
+
+  }
+
+  // If all the values are generally within tolerance of each other,
+  // find the mean min and max of all trials since all trials have equal sizes
+  encoder.set_analog_vals(round(avg_analog(mins, numTrials, tol, encoder.get_analogMax())), 
+          round(avg_analog(maxes, numTrials, tol, encoder.get_analogMax())));
+
+  Serial.printf("%s Calibration completed and values stored to EEPROM\n", encoder.name());
+
+  return issue;
+}
+
+// EFFECTS  : collects data once the wheel is stationary for lockTime milliseconds
+float encoder_find_extrema(Mapped_Encoder &encoder, const int numData, const int lockTime, float tol) {
+  // Make an array to hold the values
+  float data[numData]; // If there are memory space issues, we could make this uint16_t
+  data[0] = 0;
+
+  size_t index = 1;
+  float val;
+
+  while (index < numData) {
+    val = encoder.readRaw();
+
+    if (!check_tol(data[index-1], val, tol, encoder.get_analogMax())) { // Alternative solution: compare to moving average
+      index = 0;
+      Serial.println("Restart, no longer stationary");
+    }
+
+    else {
+      Serial.print(".");
+    }
+
+    data[index] = val;
+    index++;
+
+    delay(lockTime / numData);
+  }
+
+  float average = avg_analog(data, numData, tol, encoder.get_analogMax());
+
+  Serial.printf("Found extrema: %f\n", average);
+
+  return average;
+
+}
+
+// REQUIRES : arr is properly initialized and has length >= 1
+float avg_analog(float * arr, size_t numData, float tol, int analogMax) {
+  int numAboveMax, numBelowMax = 0; // In special case where values wrap around
+
+  int tolMax = analogMax - tol;
+
+  float average = 0;
+
+  for (size_t i = 0; i < numData; i++) {
+    average += arr[i];
+
+    if (arr[i] >= tolMax) { // 0 <= val <= tol
+      numBelowMax++;
+    }
+    else if (arr[i] <= tol) { // max - tol <= val <= max
+      numAboveMax++;
+    }
+  }
+
+  // Special cases near analogMax
+
+  // If most values lean to above the max
+  if (numBelowMax <= numAboveMax) {
+    average -= numBelowMax * analogMax;
+  }
+  // If most values lean to below the max
+  else if (numAboveMax < numBelowMax) {
+    average += numAboveMax * analogMax;
+  }
+
+  // Divide by the number and return
+  return average / numData;
+}
+
+// EFFECTS  : returns true if two values are within tolerance
+// considering both the base case and when values pass over analogMax
+bool check_tol(float lhs, float rhs, float tol, int analogMax) {
+  // In the case of values near 0 / analogMax
+  int tolMax = analogMax - tol;
+  if ((lhs >= tolMax && rhs <= tol) || (rhs >= tolMax && lhs <= tol)) {
+    return true;
+  }
+
+  // Base case
+  else {
+    DEBUG_VERBOSE("Check tolerance: %f, %f : %d", lhs, rhs, abs(lhs - rhs) <= tol);
+    return abs(lhs - rhs) <= tol;
   }
 }
