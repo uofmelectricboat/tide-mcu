@@ -20,7 +20,7 @@ CRX	| GPIO_4
 #define debuggingLevel DBG_INFO
 
 // Set whether to disable CAN (useful for debugging)
-#define DISABLECAN false
+#define DISABLECAN true
 
 // Calibration settings
 #define calTol 10
@@ -57,9 +57,6 @@ E-stop (A-BRB) is intentionally not included
 #define LED5 18
 #define LED6 17
 
-// EEPROM first address
-#define eeAddressInitial 0
-
 // Lists that contain the steering wheel buttons and LED pins
 #define NUM_BUTTONS 5
 #define NUM_LEDS 6
@@ -70,14 +67,14 @@ const String button_names[NUM_BUTTONS] = {"Comms", "Trim Up", "Trim Down", "Gain
 int LEDs[NUM_LEDS] = {LED1, LED2, LED3, LED4, LED5, LED6};
 
 // Steering wheel encoder
-Mapped_Encoder encoder(32, eeAddressInitial, BITMAX12, 0, 360, "Encoder"); // Scale => [0,360]
+Mapped_Encoder encoder(32, BITMAX12, 0, 360, "Encoder"); // Scale => [0,360]
 
 // Throttle potentiometer
-Mapped_Encoder throttle(34, eeAddressInitial + encoder.get_EEPROM_usage(), BITMAX12, 0, 100, "Throttle"); // Scale => [0,100]
+Mapped_Encoder throttle(34, BITMAX12, 0, 100, "Throttle"); // Scale => [0,100]
 
 
 // Calibration Button Combos
-int encoderCalCombo[NUM_BUTTONS] = {1, 1, 1, 0, 0};
+int encoderCalCombo[NUM_BUTTONS] = {1, 0, 0, 0, 0};
 int throttleCalCombo[NUM_BUTTONS] = {1, 0, 0, 1, 1};
 
 
@@ -268,11 +265,11 @@ int checkButtonCombo() {
   DEBUG_DEBUG("ThrottleMatch: %d", throttleMatch);
 
   if (encoderMatch) {
-    return encoderCal(encoder, calTol, calNumTrials);
+    return encoderCal(encoder, calNumTrials, calTol);
   }
 
   else if (throttleMatch) {
-    return encoderCal(throttle, calTol, calNumTrials);
+    return encoderCal(throttle, calNumTrials, calTol);
   }
 
   // Else, return 0

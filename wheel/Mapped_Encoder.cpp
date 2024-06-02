@@ -6,7 +6,7 @@
 
 #include "Arduino.h"
 #include "Mapped_Encoder.h"
-#include <EEPROM.h>
+#include <Preferences.h>
 
 // MODIFIES : passes zero boolean
 // EFFECTS  : sets the passes zero state for use by the floatMap
@@ -15,24 +15,25 @@ void Mapped_Encoder::set_passes_zero() {
 }
 
 // MODIFIES : EEPROM
-void Mapped_Encoder::update_EEPROM() {
-  EEPROM.put(eeAddress, inVals);
+void Mapped_Encoder::update_preferences() {
+  pref.begin(_name, false);
+  pref.putUShort("min", inVals.min);
+  pref.putUShort("max", inVals.max);
+  pref.putBool("zero", inVals.passes_zero);
+  pref.end();
 }
 
-Mapped_Encoder::Mapped_Encoder(int pin, int eeAddress, const uint16_t analogMax, uint32_t out_min, uint32_t out_max, const String name) : 
-  pin(pin), eeAddress(eeAddress), analogMax(analogMax), out_min(out_min), out_max(out_max), _name(name) {
+Mapped_Encoder::Mapped_Encoder(int pin, const uint16_t analogMax, uint32_t out_min, uint32_t out_max, const char * name) : 
+  pin(pin), analogMax(analogMax), out_min(out_min), out_max(out_max), _name(name) {
     
-    EEPROM.get(eeAddress, inVals);
+    pref.begin(_name, true);
 
-    // Set to default values if the signature doesn't match
-    if (inVals.signature != __signature) {
-      inVals.signature = __signature;
-      inVals.min = 0;
-      inVals.max = analogMax;
+    // Set to default values if keys don't exist
+    inVals.min = pref.getUShort("min", 0);
+    inVals.max = pref.getUShort("max", analogMax);
+    inVals.passes_zero = pref.getBool("zero", false);
 
-      set_passes_zero();
-      update_EEPROM();
-    }
+    pref.end();
   }
 
 float Mapped_Encoder::read() const {
@@ -43,7 +44,7 @@ uint16_t Mapped_Encoder::readRaw() const {
   return analogRead(pin);
 }
 
-const String & Mapped_Encoder::name() const{
+const char * Mapped_Encoder::name() const {
   return _name;
 }
 
@@ -56,7 +57,7 @@ void Mapped_Encoder::set_analog_vals(uint16_t min, uint16_t max) {
 
   set_passes_zero();
 
-  update_EEPROM();
+  update_preferences();
 }
 
 // REQUIRES : val is a valid analog value
@@ -72,9 +73,4 @@ float Mapped_Encoder::floatMap(float val) const {
 
 uint16_t Mapped_Encoder::get_analogMax() const {
   return analogMax;
-}
-
-// EFFECTS  : returns the number of bytes used in EEPROM
-int Mapped_Encoder::get_EEPROM_usage() const {
-  return sizeof(inVals);
 }

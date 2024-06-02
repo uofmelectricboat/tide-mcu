@@ -1,5 +1,6 @@
 /*
-  Mapped_Encoder.h - Library for getting input from a potentiometer or encoder and mapping it
+  Mapped_Encoder.h - Library for getting input from a potentiometer or encoder, mapping it, 
+  and storing its settings in EEPROM
   Created by David Anapolsky, May 21, 2024.
 */
 
@@ -8,53 +9,47 @@
 
 #include "Arduino.h"
 
-#include <EEPROM.h>
+#include <Preferences.h>
 
 #define BITMAX10 1023
 #define BITMAX12 4095
 
-// To check if the EEPROM is empty
-#define __signature 602
-
 class Mapped_Encoder {
   private:
+    void set_passes_zero();
+
+    void update_preferences();
+
+    struct EEPROMVals { 
+      uint16_t min;
+      uint16_t max;
+      bool passes_zero;
+    };
+
+    Preferences pref;
     int pin;
     const uint16_t analogMax;
 
     uint32_t out_min;
     uint32_t out_max;
 
-    const String _name;
-
-    void set_passes_zero();
-
-    void update_EEPROM();
-
-    struct EEPROMVals {
-      uint8_t signature;
-      uint16_t min;
-      uint16_t max;
-      bool passes_zero;
-    };
+    const char * _name;
 
     EEPROMVals inVals;
-    int eeAddress;
 
   public:
-    Mapped_Encoder(int pin, int eeAddress, const uint16_t analogMax, uint32_t out_min, uint32_t out_max, const String name);
+    Mapped_Encoder(int pin, const uint16_t analogMax, uint32_t out_min, uint32_t out_max, const char * name);
 
     float read() const;
     uint16_t readRaw() const;
 
-    const String & name() const;
+    const char * name() const;
 
     void set_analog_vals(uint16_t min, uint16_t max);
 
     float floatMap(float x) const;
 
     uint16_t get_analogMax() const;
-
-    int get_EEPROM_usage() const;
 };
 
 #endif
