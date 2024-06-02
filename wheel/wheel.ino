@@ -20,11 +20,11 @@ CRX	| GPIO_4
 #define debuggingLevel DBG_INFO
 
 // Set whether to disable CAN (useful for debugging)
-#define DISABLECAN true
+#define DISABLECAN false
 
 // Calibration settings
 #define calTol 10
-#define calNumTrials 2
+#define calNumTrials 3
 
 // Can bitrate
 #define bitrateCAN 500E3
@@ -74,7 +74,7 @@ Mapped_Encoder throttle(34, BITMAX12, 0, 100, "Throttle"); // Scale => [0,100]
 
 
 // Calibration Button Combos
-int encoderCalCombo[NUM_BUTTONS] = {1, 0, 0, 0, 0};
+int encoderCalCombo[NUM_BUTTONS] = {1, 1, 1, 0, 0};
 int throttleCalCombo[NUM_BUTTONS] = {1, 0, 0, 1, 1};
 
 
